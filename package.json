@@ -1,0 +1,15 @@
+{
+  "name": "duxi-codes",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "dev:landing": "pnpm --filter landing-page dev",
+    "dev:captable": "pnpm --filter captable-app dev",
+    "build:landing": "pnpm --filter landing-page build",
+    "build:captable": "pnpm --filter captable-app build"
+  },
+  "packageManager": "pnpm@9.0.0"
+}
+

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm build",
+  "installCommand": "pnpm install",
+  "framework": null,
+  "outputDirectory": null,
+  "rewrites": [
+    {
+      "source": "/captable",
+      "destination": "/captable/"
+    },
+    {
+      "source": "/captable/:path*",
+      "destination": "/captable/:path*"
+    }
+  ],
+  "builds": [
+    {
+      "src": "apps/landing-page/package.json",
+      "use": "@vercel/next"
+    },
+    {
+      "src": "apps/captable-app/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/captable/(.*)",
+      "dest": "/apps/captable-app/$1"
+    },
+    {
+      "src": "/captable",
+      "dest": "/apps/captable-app/index.html"
+    },
+    {
+      "src": "/((?!captable).*)",
+      "dest": "/apps/landing-page/$1"
+    }
+  ]
+}
