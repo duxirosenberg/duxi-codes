@@ -1,10 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/captable/assets/:path*", "destination": "/assets/:path*" },
-    { "source": "/captable/:path*", "destination": "/index.html" },
-    { "source": "/captable", "destination": "/index.html" },
-    { "source": "/:path((?!assets/).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
-
