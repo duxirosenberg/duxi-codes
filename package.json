@@ -3,13 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm -r dev",
-    "build": "pnpm -r build",
-    "dev:landing": "pnpm --filter landing-page dev",
-    "dev:captable": "pnpm --filter captable-app dev",
-    "build:landing": "pnpm --filter landing-page build",
-    "build:captable": "pnpm --filter captable-app build"
+    "dev": "nx run-many -t dev",
+    "build": "nx run-many -t build",
+    "dev:landing": "nx run landing-page:dev",
+    "dev:captable": "nx run captable-app:dev",
+    "build:landing": "nx run landing-page:build",
+    "build:captable": "nx run captable-app:build"
   },
-  "packageManager": "pnpm@9.0.0"
+  "packageManager": "pnpm@9.0.0",
+  "devDependencies": {
+    "@nx/workspace": "^22.1.3",
+    "nx": "^22.1.3"
+  }
 }
-

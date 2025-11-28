@@ -3,7 +3,8 @@
   "rewrites": [
     { "source": "/captable/assets/:path*", "destination": "/assets/:path*" },
     { "source": "/captable/:path*", "destination": "/index.html" },
-    { "source": "/captable", "destination": "/index.html" }
+    { "source": "/captable", "destination": "/index.html" },
+    { "source": "/:path((?!assets/).*)", "destination": "/index.html" }
   ]
 }
 
