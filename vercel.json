@@ -4,16 +4,6 @@
   "installCommand": "pnpm install",
   "framework": null,
   "outputDirectory": null,
-  "rewrites": [
-    {
-      "source": "/captable",
-      "destination": "/captable/"
-    },
-    {
-      "source": "/captable/:path*",
-      "destination": "/captable/:path*"
-    }
-  ],
   "builds": [
     {
       "src": "apps/landing-page/package.json",
