@@ -555,6 +555,7 @@ function AppContent() {
                     }}
                     onDeleteEvent={handleDeleteEvent}
                     capTableState={capTable?.state || null}
+                    currency={selectedCompany?.baseCurrency || 'USD'}
                   />
                 </motion.div>
               )}
@@ -640,6 +641,7 @@ function AppContent() {
               setShowEventModal(false);
               setEditingEvent(null);
             }}
+            currency={selectedCompany.baseCurrency || 'USD'}
           />
         )}
       </AnimatePresence>

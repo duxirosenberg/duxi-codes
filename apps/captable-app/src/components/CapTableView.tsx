@@ -28,8 +28,13 @@ type TabType = 'legal' | 'fully_diluted' | 'pro_forma' | 'evolution';
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$',
-  GBP: '£',
   EUR: '€',
+  GBP: '£',
+  CHF: 'CHF',
+  JPY: '¥',
+  CNY: '¥',
+  CAD: 'C$',
+  AUD: 'A$',
 };
 
 const CHART_COLORS = [
@@ -269,7 +274,7 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
         <div className="stat-card">
           <div className="stat-label">Latest Price/Share</div>
           <div className="stat-value">
-            {latestPricePerShare ? `$${latestPricePerShare.toFixed(4)}` : 'N/A'}
+            {latestPricePerShare ? `${currencySymbol}${latestPricePerShare.toFixed(4)}` : 'N/A'}
           </div>
         </div>
         <div className="stat-card">
@@ -405,11 +410,11 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
                       </span>
                     </td>
                     <td className="text-right font-mono">
-                      ${Number(safe.principalAmount).toLocaleString()}
+                      {currencySymbol}{Number(safe.principalAmount).toLocaleString()}
                     </td>
                     <td className="text-right font-mono">
                       {safe.valuationCap 
-                        ? `$${Number(safe.valuationCap).toLocaleString()}`
+                        ? `${currencySymbol}${Number(safe.valuationCap).toLocaleString()}`
                         : '—'}
                     </td>
                     <td className="text-right font-mono">
@@ -735,7 +740,7 @@ function ProFormaCapTable({ capTable, currencySymbol }: { capTable: CapTableResp
             Price/Share
           </div>
           <div className="text-xl font-semibold text-charcoal-900">
-            ${scenario.impliedPrice.toFixed(4)}
+            {currencySymbol}{scenario.impliedPrice.toFixed(4)}
           </div>
         </div>
         <div className="card p-4">
@@ -776,7 +781,7 @@ function ProFormaCapTable({ capTable, currencySymbol }: { capTable: CapTableResp
                   <td className="px-4 py-3 text-right font-mono tabular-nums">
                     {conv.cap ? formatCurrency(conv.cap) : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">${conv.effectivePrice.toFixed(4)}</td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums">{currencySymbol}{conv.effectivePrice.toFixed(4)}</td>
                   <td className="px-4 py-3 text-right font-mono tabular-nums">{conv.shares.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right font-mono tabular-nums">
                     {((conv.shares / scenario.totalSharesAfter) * 100).toFixed(2)}%

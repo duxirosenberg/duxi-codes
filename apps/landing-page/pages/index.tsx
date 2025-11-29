@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import Head from 'next/head';
 
 export default function Home() {
@@ -30,7 +29,7 @@ export default function Home() {
     <>
       <Head>
         <title>Duxi</title>
-        <meta name="description" content="Precision tools for founders" />
+        <meta name="description" content="Personal projects" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
@@ -58,7 +57,7 @@ export default function Home() {
           {/* Header */}
           <header style={styles.header}>
             <h1 style={styles.logo}>Duxi</h1>
-            <p style={styles.tagline}>Precision tools for founders</p>
+            <p style={styles.tagline}>Personal projects</p>
           </header>
 
           {/* Divider */}
@@ -74,38 +73,18 @@ export default function Home() {
               Track ownership evolution with precision. Model rounds, SAFEs, 
               option pools, and exit scenarios—all in one timeline.
             </p>
-            <Link href="/captable" style={styles.productLink}>
+            <a href="https://captable.duxi.codes" style={styles.productLink}>
               Open Cap Table
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginLeft: 8 }}>
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
-            </Link>
-          </section>
-
-          {/* Features */}
-          <section style={styles.features}>
-            <div style={styles.feature}>
-              <span style={styles.featureNumber}>—</span>
-              <span style={styles.featureText}>Legal & fully diluted views</span>
-            </div>
-            <div style={styles.feature}>
-              <span style={styles.featureNumber}>—</span>
-              <span style={styles.featureText}>SAFE conversion modeling</span>
-            </div>
-            <div style={styles.feature}>
-              <span style={styles.featureNumber}>—</span>
-              <span style={styles.featureText}>Exit waterfall analysis</span>
-            </div>
-            <div style={styles.feature}>
-              <span style={styles.featureNumber}>—</span>
-              <span style={styles.featureText}>Team collaboration</span>
-            </div>
+            </a>
           </section>
         </main>
 
         {/* Footer */}
         <footer style={styles.footer}>
-          <span>© 2024 Duxi</span>
+          <span>© 2025 Duxi</span>
         </footer>
       </div>
     </>
@@ -200,24 +179,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     borderRadius: '2px',
     transition: 'all var(--transition)',
     backgroundColor: 'transparent',
-  },
-  features: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.875rem',
-  },
-  feature: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem',
-  },
-  featureNumber: {
-    fontSize: '0.875rem',
-    color: 'var(--text-tertiary)',
-  },
-  featureText: {
-    fontSize: '0.9375rem',
-    color: 'var(--text-secondary)',
   },
   footer: {
     paddingTop: '2rem',

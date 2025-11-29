@@ -21,6 +21,7 @@ interface TimelineProps {
   onEditEvent: (event: EventBase) => void;
   onDeleteEvent: (eventId: string) => void;
   capTableState: CapTableState | null;
+  currency?: string;
 }
 
 const eventIcons: Record<EventType, typeof Building> = {
@@ -49,6 +50,7 @@ export function Timeline({
   onSelectEvent,
   onEditEvent,
   onDeleteEvent,
+  currency = 'USD',
 }: TimelineProps) {
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -62,7 +64,7 @@ export function Timeline({
   const formatCurrency = (amount: string | number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: currency,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(Number(amount));
@@ -213,7 +215,7 @@ export function Timeline({
                         </p>
                       )}
                       
-                      <EventDetails event={event} />
+                      <EventDetails event={event} currency={currency} />
 
                       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-charcoal-100">
                         <button
@@ -251,8 +253,17 @@ export function Timeline({
   );
 }
 
-function EventDetails({ event }: { event: EventBase }) {
+function EventDetails({ event, currency = 'USD' }: { event: EventBase; currency?: string }) {
   const data = event.data as Record<string, unknown>;
+  
+  const formatMoney = (amount: string | number, decimals = 0) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(Number(amount));
+  };
 
   switch (event.type) {
     case 'incorporation':
@@ -285,7 +296,7 @@ function EventDetails({ event }: { event: EventBase }) {
           <div className="grid grid-cols-3 gap-4">
             <div>
               <p className="text-charcoal-500 text-xs uppercase tracking-wider mb-1">Amount Raised</p>
-              <p className="font-mono">${Number(data.totalNewMoney || 0).toLocaleString()}</p>
+              <p className="font-mono">{formatMoney(Number(data.totalNewMoney) || 0)}</p>
             </div>
             <div>
               <p className="text-charcoal-500 text-xs uppercase tracking-wider mb-1">Valuation Type</p>
@@ -296,7 +307,7 @@ function EventDetails({ event }: { event: EventBase }) {
                 {data.valuationInputType === 'pre_money' ? 'Pre-Money' : 'Post-Money'}
               </p>
               <p className="font-mono">
-                ${Number(data.postMoneyValuation || data.preMoneyValuation || 0).toLocaleString()}
+                {formatMoney(Number(data.postMoneyValuation || data.preMoneyValuation) || 0)}
               </p>
             </div>
           </div>
@@ -308,7 +319,7 @@ function EventDetails({ event }: { event: EventBase }) {
                 {(data.investors as Array<{name: string; amount: string}>).map((inv, i) => (
                   <div key={i} className="flex justify-between items-center">
                     <span>{inv.name}</span>
-                    <span className="font-mono">${Number(inv.amount).toLocaleString()}</span>
+                    <span className="font-mono">{formatMoney(inv.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -328,11 +339,11 @@ function EventDetails({ event }: { event: EventBase }) {
                   <p className="font-medium">{safe.investorName}</p>
                   <p className="text-xs text-charcoal-500 mt-0.5">
                     {safe.valuationType === 'post_money' ? 'Post-Money' : 'Pre-Money'} SAFE
-                    {safe.valuationCap && ` • $${Number(safe.valuationCap).toLocaleString()} cap`}
+                    {safe.valuationCap && ` • ${formatMoney(safe.valuationCap)} cap`}
                     {safe.discountPercent && ` • ${safe.discountPercent}% discount`}
                   </p>
                 </div>
-                <p className="font-mono">${Number(safe.principalAmount).toLocaleString()}</p>
+                <p className="font-mono">{formatMoney(safe.principalAmount)}</p>
               </div>
             </div>
           ))}
@@ -352,7 +363,7 @@ function EventDetails({ event }: { event: EventBase }) {
           </div>
           <div>
             <p className="text-charcoal-500 text-xs uppercase tracking-wider mb-1">Strike Price</p>
-            <p className="font-mono">${Number(data.strikePrice || 0).toFixed(4)}</p>
+            <p className="font-mono">{formatMoney(Number(data.strikePrice) || 0, 4)}</p>
           </div>
           {data.vestingSchedule ? (
             <div>

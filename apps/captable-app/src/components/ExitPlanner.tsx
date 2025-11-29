@@ -32,7 +32,19 @@ const CHART_COLORS = [
   '#84cc16',
 ];
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  CHF: 'CHF',
+  JPY: '¥',
+  CNY: '¥',
+  CAD: 'C$',
+  AUD: 'A$',
+};
+
 export function ExitPlanner({ companyId, events, currency }: ExitPlannerProps) {
+  const currencySymbol = CURRENCY_SYMBOLS[currency] || currency + ' ';
   const [exitValuation, setExitValuation] = useState<string>('10000000');
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const [waterfall, setWaterfall] = useState<ExitWaterfall | null>(null);
@@ -40,8 +52,7 @@ export function ExitPlanner({ companyId, events, currency }: ExitPlannerProps) {
   const [error, setError] = useState<string | null>(null);
 
   const formatCurrency = (amount: string | number) => {
-    const symbols: Record<string, string> = { USD: '$', GBP: '£', EUR: '€' };
-    return `${symbols[currency] || currency + ' '}${Number(amount).toLocaleString(undefined, {
+    return `${currencySymbol}${Number(amount).toLocaleString(undefined, {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     })}`;
@@ -111,7 +122,7 @@ export function ExitPlanner({ companyId, events, currency }: ExitPlannerProps) {
               <label className="input-label">Exit Valuation</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">
-                  {currency === 'USD' ? '$' : currency === 'GBP' ? '£' : '€'}
+                  {currencySymbol}
                 </span>
                 <input
                   type="number"

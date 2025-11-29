@@ -13,7 +13,21 @@ interface EventModalProps {
   capTable: CapTableResponse | null;
   onSave: (data: Omit<EventBase, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   onClose: () => void;
+  currency?: string;
 }
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  CHF: 'CHF',
+  JPY: '¥',
+  CNY: '¥',
+  CAD: 'C$',
+  AUD: 'A$',
+};
+
+const getCurrencySymbol = (currency: string) => CURRENCY_SYMBOLS[currency] || currency + ' ';
 
 export function EventModal({
   companyId,
@@ -22,7 +36,9 @@ export function EventModal({
   capTable,
   onSave,
   onClose,
+  currency = 'USD',
 }: EventModalProps) {
+  const currencySymbol = getCurrencySymbol(currency);
   // Check if incorporation event exists
   const hasIncorporation = existingEvents.some(e => e.type === 'incorporation');
   
@@ -223,6 +239,8 @@ export function EventModal({
             <IncorporationForm
               data={eventData}
               onChange={setEventData}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
           {eventType === 'priced_round' && (
@@ -231,24 +249,32 @@ export function EventModal({
               onChange={setEventData}
               people={people}
               safes={safes}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
           {eventType === 'safe_issuance' && (
             <SAFEIssuanceForm
               data={eventData}
               onChange={setEventData}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
           {eventType === 'esop_pool_creation' && (
             <ESOPPoolCreationForm
               data={eventData}
               onChange={setEventData}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
           {eventType === 'esop_pool_extension' && (
             <ESOPPoolExtensionForm
               data={eventData}
               onChange={setEventData}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
           {eventType === 'esop_grant' && (
@@ -256,6 +282,8 @@ export function EventModal({
               data={eventData}
               onChange={setEventData}
               people={people}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
           {eventType === 'option_exercise' && (
@@ -263,6 +291,8 @@ export function EventModal({
               data={eventData}
               onChange={setEventData}
               people={people}
+              currencySymbol={currencySymbol}
+              currency={currency}
             />
           )}
 
@@ -295,6 +325,8 @@ export function EventModal({
 interface FormProps {
   data: Record<string, unknown>;
   onChange: (data: Record<string, unknown>) => void;
+  currencySymbol: string;
+  currency: string;
 }
 
 function IncorporationForm({ data, onChange }: FormProps) {
@@ -517,7 +549,15 @@ function IncorporationForm({ data, onChange }: FormProps) {
   );
 }
 
-function PricedRoundForm({ data, onChange, people, safes }: FormProps & { people: Person[]; safes: SAFE[] }) {
+function PricedRoundForm({ data, onChange, people, safes, currencySymbol, currency }: FormProps & { people: Person[]; safes: SAFE[] }) {
+  const formatMoney = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
   const [valuationType, setValuationType] = useState<'post_money' | 'pre_money' | 'price_per_share'>(
     (data.valuationInputType as 'post_money' | 'pre_money' | 'price_per_share') || 'post_money'
   );
@@ -636,7 +676,7 @@ function PricedRoundForm({ data, onChange, people, safes }: FormProps & { people
           </button>
         </div>
         <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">$</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">{currencySymbol}</span>
           <input
             type="number"
             value={valuation}
@@ -667,7 +707,7 @@ function PricedRoundForm({ data, onChange, people, safes }: FormProps & { people
                 placeholder="Investor name"
               />
               <div className="relative w-40">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">{currencySymbol}</span>
                 <input
                   type="number"
                   value={investor.amount}
@@ -697,7 +737,7 @@ function PricedRoundForm({ data, onChange, people, safes }: FormProps & { people
             Add Investor
           </button>
           <span className="text-sm font-mono text-charcoal-600">
-            Total: ${totalInvestment.toLocaleString()}
+            Total: {formatMoney(totalInvestment)}
           </span>
         </div>
       </div>
@@ -875,10 +915,10 @@ function PricedRoundForm({ data, onChange, people, safes }: FormProps & { people
                     </td>
                     <td className="px-3 py-2 font-medium">{safe.investorName}</td>
                     <td className="px-3 py-2 text-right font-mono">
-                      ${Number(safe.principalAmount).toLocaleString()}
+                      {formatMoney(Number(safe.principalAmount))}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
-                      {safe.valuationCap ? `$${Number(safe.valuationCap).toLocaleString()}` : '—'}
+                      {safe.valuationCap ? formatMoney(Number(safe.valuationCap)) : '—'}
                     </td>
                     <td className="px-3 py-2 text-right font-mono">
                       {safe.discountPercent ? `${safe.discountPercent}%` : '—'}
@@ -901,10 +941,9 @@ function PricedRoundForm({ data, onChange, people, safes }: FormProps & { people
                     Total Converting
                   </td>
                   <td className="px-3 py-2 text-right font-mono">
-                    ${safes
+                    {formatMoney(safes
                       .filter(s => selectedSafes.includes(s.id))
-                      .reduce((sum, s) => sum + Number(s.principalAmount), 0)
-                      .toLocaleString()}
+                      .reduce((sum, s) => sum + Number(s.principalAmount), 0))}
                   </td>
                   <td colSpan={3}></td>
                 </tr>
@@ -929,7 +968,7 @@ type SAFEFormItem = {
   notes: string;
 };
 
-function SAFEIssuanceForm({ data, onChange }: FormProps) {
+function SAFEIssuanceForm({ data, onChange, currencySymbol }: FormProps) {
   const [safes, setSafes] = useState<SAFEFormItem[]>(
     (data.safes as SAFEFormItem[]) || [{
       id: uuidv4(),
@@ -1015,7 +1054,7 @@ function SAFEIssuanceForm({ data, onChange }: FormProps) {
             <div>
               <label className="input-label">Investment Amount</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">{currencySymbol}</span>
                 <input
                   type="number"
                   value={safe.principalAmount}
@@ -1059,7 +1098,7 @@ function SAFEIssuanceForm({ data, onChange }: FormProps) {
             <div>
               <label className="input-label">Valuation Cap (Optional)</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">{currencySymbol}</span>
                 <input
                   type="number"
                   value={safe.valuationCap}
@@ -1223,7 +1262,7 @@ function ESOPPoolExtensionForm({ data, onChange }: FormProps) {
   );
 }
 
-function ESOPGrantForm({ data, onChange, people }: FormProps & { people: Person[] }) {
+function ESOPGrantForm({ data, onChange, people, currencySymbol }: FormProps & { people: Person[] }) {
   const [employeeId, setEmployeeId] = useState((data.employeeId as string) || uuidv4());
   const [employeeName, setEmployeeName] = useState((data.employeeName as string) || '');
   const [grantMode, setGrantMode] = useState<'shares' | 'percentage'>(
@@ -1353,7 +1392,7 @@ function ESOPGrantForm({ data, onChange, people }: FormProps & { people: Person[
         <div>
           <label className="input-label">Strike Price</label>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">$</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">{currencySymbol}</span>
             <input
               type="number"
               value={strikePrice}
