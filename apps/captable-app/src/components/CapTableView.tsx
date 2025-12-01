@@ -12,7 +12,6 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { AlertTriangle, TrendingUp } from 'lucide-react';
 import type { CapTableResponse, EventBase, OwnershipSnapshot } from '../types';
 import { PERSON_TYPE_LABELS, ESOP_POOL_HOLDER_ID } from '../types';
 
@@ -24,7 +23,7 @@ interface CapTableViewProps {
   currency: string;
 }
 
-type TabType = 'legal' | 'fully_diluted' | 'pro_forma' | 'evolution';
+type TabType = 'legal' | 'fully_diluted' | 'evolution';
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$',
@@ -95,19 +94,9 @@ export function CapTableView({
           }`}
         >
           Fully Diluted
-        </button>
-        <button
-          onClick={() => setActiveTab('pro_forma')}
-          className={`px-4 py-2 text-sm font-medium rounded-sm transition-colors ${
-            activeTab === 'pro_forma'
-              ? 'bg-white text-charcoal-900 shadow-sm'
-              : 'text-charcoal-600 hover:text-charcoal-900'
-          }`}
-        >
-          Pro Forma
           {capTable.fullyDilutedCapTable.unconvertedSAFEs.length > 0 && (
             <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded">
-              {capTable.fullyDilutedCapTable.unconvertedSAFEs.length}
+              {capTable.fullyDilutedCapTable.unconvertedSAFEs.length} SAFEs
             </span>
           )}
         </button>
@@ -134,10 +123,7 @@ export function CapTableView({
           <LegalCapTable capTable={capTable} currencySymbol={currencySymbol} />
         )}
         {activeTab === 'fully_diluted' && (
-          <FullyDilutedCapTable capTable={capTable} currencySymbol={currencySymbol} />
-        )}
-        {activeTab === 'pro_forma' && (
-          <ProFormaCapTable capTable={capTable} currencySymbol={currencySymbol} />
+          <FullyDilutedCapTable capTable={capTable} currencySymbol={currencySymbol} currency={currency} />
         )}
         {activeTab === 'evolution' && (
           <OwnershipEvolution 
@@ -241,8 +227,9 @@ function LegalCapTable({ capTable, currencySymbol }: { capTable: CapTableRespons
   );
 }
 
-function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTableResponse; currencySymbol: string }) {
-  const { fullyDilutedCapTable, legalCapTable } = capTable;
+function FullyDilutedCapTable({ capTable, currencySymbol, currency }: { capTable: CapTableResponse; currencySymbol: string; currency: string }) {
+  const { fullyDilutedCapTable } = capTable;
+  const [proFormaValuation, setProFormaValuation] = useState<string>('');
 
   // Get latest share price from preferred classes (last priced round)
   const preferredClasses = fullyDilutedCapTable.shareClasses.filter(sc => sc.type === 'preferred');
@@ -262,6 +249,168 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
     }
     return `${currencySymbol}${amount.toFixed(2)}`;
   };
+
+  // Group rows by investor name (combine multiple investments from same person)
+  const groupedRows = useMemo(() => {
+    const grouped = new Map<string, {
+      holderName: string;
+      holderType: string;
+      isESOPPool: boolean;
+      issuedShares: number;
+      optionShares: number;
+      totalShares: number;
+    }>();
+
+    for (const row of fullyDilutedCapTable.rows) {
+      const existing = grouped.get(row.holderName);
+      if (existing) {
+        existing.issuedShares += row.issuedShares;
+        existing.optionShares += row.optionShares;
+        existing.totalShares += row.totalShares;
+      } else {
+        grouped.set(row.holderName, {
+          holderName: row.holderName,
+          holderType: row.holderType,
+          isESOPPool: row.isESOPPool,
+          issuedShares: row.issuedShares,
+          optionShares: row.optionShares,
+          totalShares: row.totalShares,
+        });
+      }
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => b.totalShares - a.totalShares);
+  }, [fullyDilutedCapTable.rows]);
+
+  // Calculate pro forma ownership if SAFEs convert
+  const proFormaData = useMemo(() => {
+    const unconvertedSAFEs = fullyDilutedCapTable.unconvertedSAFEs;
+    if (unconvertedSAFEs.length === 0) return null;
+
+    const currentFDShares = fullyDilutedCapTable.totalShares;
+    const inputValuation = proFormaValuation ? parseFloat(proFormaValuation) : null;
+    
+    // If no valuation input, use highest cap as default (or can't calculate for uncapped)
+    const safesWithCaps = unconvertedSAFEs.filter(s => s.valuationCap);
+    const highestCap = safesWithCaps.length > 0 
+      ? Math.max(...safesWithCaps.map(s => Number(s.valuationCap)))
+      : null;
+    
+    // Use input valuation, or fall back to highest cap
+    const preMoneyValuation = inputValuation || highestCap;
+    
+    // If no valuation can be determined, we can still calculate using round price alone
+    // This handles uncapped SAFEs
+    const impliedPrice = preMoneyValuation 
+      ? preMoneyValuation / currentFDShares 
+      : (latestPricePerShare || 1); // Use latest price or $1 as fallback
+
+    let totalSafeShares = 0;
+    const safeConversions: Array<{
+      investorName: string;
+      principal: number;
+      cap: number | null;
+      discount: number;
+      effectivePrice: number;
+      shares: number;
+      method: string;
+    }> = [];
+
+    for (const safe of unconvertedSAFEs) {
+      const principal = Number(safe.principalAmount);
+      let effectivePrice = impliedPrice;
+      let method = 'round_price';
+
+      // Cap price calculation
+      if (safe.valuationCap && preMoneyValuation) {
+        const capPrice = Number(safe.valuationCap) / currentFDShares;
+        if (capPrice < effectivePrice) {
+          effectivePrice = capPrice;
+          method = 'cap';
+        }
+      }
+
+      // Discount price
+      if (safe.discountPercent && safe.discountPercent > 0) {
+        const discountPrice = impliedPrice * (1 - safe.discountPercent / 100);
+        if (discountPrice < effectivePrice) {
+          effectivePrice = discountPrice;
+          method = 'discount';
+        }
+      }
+
+      const shares = Math.round(principal / effectivePrice);
+      totalSafeShares += shares;
+
+      safeConversions.push({
+        investorName: safe.investorName || 'Unknown',
+        principal,
+        cap: safe.valuationCap ? Number(safe.valuationCap) : null,
+        discount: safe.discountPercent || 0,
+        effectivePrice,
+        shares,
+        method
+      });
+    }
+
+    const totalSharesAfter = currentFDShares + totalSafeShares;
+    const postMoneyValuation = preMoneyValuation 
+      ? preMoneyValuation + unconvertedSAFEs.reduce((sum, s) => sum + Number(s.principalAmount), 0)
+      : totalSharesAfter * impliedPrice;
+
+    // Build pro forma rows (grouped)
+    const proFormaRows = new Map<string, {
+      holderName: string;
+      holderType: string;
+      currentShares: number;
+      safeShares: number;
+      totalShares: number;
+      proFormaPercent: number;
+    }>();
+
+    // Add existing shareholders
+    for (const row of groupedRows) {
+      proFormaRows.set(row.holderName, {
+        holderName: row.holderName,
+        holderType: row.holderType,
+        currentShares: row.totalShares,
+        safeShares: 0,
+        totalShares: row.totalShares,
+        proFormaPercent: (row.totalShares / totalSharesAfter) * 100
+      });
+    }
+
+    // Add/merge SAFE conversions
+    for (const conv of safeConversions) {
+      const existing = proFormaRows.get(conv.investorName);
+      if (existing) {
+        existing.safeShares += conv.shares;
+        existing.totalShares += conv.shares;
+        existing.proFormaPercent = (existing.totalShares / totalSharesAfter) * 100;
+      } else {
+        proFormaRows.set(conv.investorName, {
+          holderName: conv.investorName,
+          holderType: 'investor',
+          currentShares: 0,
+          safeShares: conv.shares,
+          totalShares: conv.shares,
+          proFormaPercent: (conv.shares / totalSharesAfter) * 100
+        });
+      }
+    }
+
+    return {
+      preMoneyValuation,
+      postMoneyValuation,
+      impliedPrice,
+      safeConversions,
+      totalSafeShares,
+      totalSharesAfter,
+      currentFDShares,
+      rows: Array.from(proFormaRows.values()).sort((a, b) => b.proFormaPercent - a.proFormaPercent),
+      hasValuationInput: !!inputValuation
+    };
+  }, [fullyDilutedCapTable, groupedRows, proFormaValuation, latestPricePerShare]);
 
   return (
     <div className="space-y-6">
@@ -301,8 +450,8 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
       <div className="p-4 bg-charcoal-50 rounded-sm border border-charcoal-100">
         <p className="text-sm text-charcoal-600">
           <strong className="text-charcoal-900">Fully Diluted Cap Table</strong> includes all 
-          issued shares plus all options (vested and unvested), unallocated ESOP pool, and 
-          assumes all convertible instruments convert. Value is calculated using the latest priced round share price.
+          issued shares plus all options (vested and unvested), unallocated ESOP pool. 
+          Investors with multiple investments are grouped together.
         </p>
       </div>
 
@@ -322,11 +471,12 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
               </tr>
             </thead>
             <tbody>
-              {fullyDilutedCapTable.rows.map((row) => {
+              {groupedRows.map((row) => {
+                const ownershipPercent = (row.totalShares / fullyDilutedCapTable.totalShares) * 100;
                 const value = latestPricePerShare ? row.totalShares * latestPricePerShare : null;
                 return (
                   <tr 
-                    key={row.holderId}
+                    key={row.holderName}
                     className={`border-b border-charcoal-100 hover:bg-charcoal-50/50 ${row.isESOPPool ? 'bg-charcoal-50/50' : ''}`}
                   >
                     <td className="px-4 py-3 font-medium">
@@ -337,7 +487,7 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
                     </td>
                     <td className="px-4 py-3">
                       <span className={`badge-default ${row.isESOPPool ? 'bg-blue-100 text-blue-700' : ''}`}>
-                        {PERSON_TYPE_LABELS[row.holderType]}
+                        {PERSON_TYPE_LABELS[row.holderType as keyof typeof PERSON_TYPE_LABELS]}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-mono tabular-nums">
@@ -350,7 +500,7 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
                       {row.totalShares.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-right font-mono tabular-nums">
-                      {row.ownershipPercent}%
+                      {ownershipPercent.toFixed(2)}%
                     </td>
                     <td className="px-4 py-3 text-right font-mono tabular-nums text-emerald-600">
                       {value ? formatCurrency(value) : '—'}
@@ -363,10 +513,10 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
               <tr className="bg-charcoal-50">
                 <td colSpan={2} className="px-4 py-3 font-medium">Total</td>
                 <td className="px-4 py-3 text-right font-mono tabular-nums font-medium">
-                  {fullyDilutedCapTable.rows.reduce((sum, r) => sum + r.issuedShares, 0).toLocaleString()}
+                  {groupedRows.reduce((sum, r) => sum + r.issuedShares, 0).toLocaleString()}
                 </td>
                 <td className="px-4 py-3 text-right font-mono tabular-nums font-medium">
-                  {fullyDilutedCapTable.rows.reduce((sum, r) => sum + r.optionShares, 0).toLocaleString()}
+                  {groupedRows.reduce((sum, r) => sum + r.optionShares, 0).toLocaleString()}
                 </td>
                 <td className="px-4 py-3 text-right font-mono tabular-nums font-medium">
                   {fullyDilutedCapTable.totalShares.toLocaleString()}
@@ -381,7 +531,7 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
         </div>
       </div>
 
-      {/* Unconverted SAFEs */}
+      {/* Outstanding SAFEs */}
       {fullyDilutedCapTable.unconvertedSAFEs.length > 0 && (
         <div className="card">
           <div className="card-header">
@@ -415,7 +565,7 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
                     <td className="text-right font-mono">
                       {safe.valuationCap 
                         ? `${currencySymbol}${Number(safe.valuationCap).toLocaleString()}`
-                        : '—'}
+                        : <span className="text-charcoal-400">Uncapped</span>}
                     </td>
                     <td className="text-right font-mono">
                       {safe.discountPercent ? `${safe.discountPercent}%` : '—'}
@@ -427,473 +577,119 @@ function FullyDilutedCapTable({ capTable, currencySymbol }: { capTable: CapTable
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-/**
- * Pro Forma Cap Table - Shows what ownership would look like if SAFEs converted at their caps
- * This is useful for fundraising planning to understand potential dilution
- */
-function ProFormaCapTable({ capTable, currencySymbol }: { capTable: CapTableResponse; currencySymbol: string }) {
-  const { fullyDilutedCapTable, legalCapTable } = capTable;
-  const unconvertedSAFEs = fullyDilutedCapTable.unconvertedSAFEs;
-  
-  // Calculate pro forma ownership assuming SAFEs convert at their caps
-  const proFormaData = useMemo(() => {
-    if (unconvertedSAFEs.length === 0) {
-      return null;
-    }
-
-    // Get current fully diluted shares (excluding SAFEs since they haven't converted)
-    const currentFDShares = fullyDilutedCapTable.totalShares;
-    
-    // Find the highest SAFE cap to use as the implied valuation
-    const safesWithCaps = unconvertedSAFEs.filter(s => s.valuationCap);
-    if (safesWithCaps.length === 0) {
-      return null;
-    }
-    
-    // Get cap values - these might be pre-money or post-money
-    const highestCap = Math.max(...safesWithCaps.map(s => Number(s.valuationCap)));
-    const lowestCap = Math.min(...safesWithCaps.map(s => Number(s.valuationCap)));
-    
-    // Total SAFE principal for post-money calculation
-    const totalSafePrincipal = unconvertedSAFEs.reduce((sum, s) => sum + Number(s.principalAmount), 0);
-    
-    // Calculate conversion for each SAFE at a given pre-money cap valuation
-    // Returns post-money valuation and all conversion details
-    const calculateConversions = (preMoneyCapValuation: number) => {
-      // For pre-money SAFEs: Post-money = Pre-money cap + SAFE principal
-      // The price per share is based on pre-money cap / pre-round shares
-      const impliedPrice = preMoneyCapValuation / currentFDShares;
-      
-      let totalSafeShares = 0;
-      const safeConversions: Array<{
-        investorId: string;
-        investorName: string;
-        principal: number;
-        cap: number | null;
-        valuationType: string;
-        discount: number;
-        effectivePrice: number;
-        shares: number;
-        method: string;
-      }> = [];
-      
-      for (const safe of unconvertedSAFEs) {
-        const principal = Number(safe.principalAmount);
-        let effectivePrice = impliedPrice;
-        let method = 'round_price';
-        
-        // Cap price calculation depends on SAFE type
-        if (safe.valuationCap) {
-          let capPrice: number;
-          if (safe.valuationType === 'post_money') {
-            // Post-money SAFE: ownership = principal / cap
-            // So effective price = cap / (shares that give them that ownership)
-            // For simplicity, we use the same formula but note it's post-money
-            capPrice = Number(safe.valuationCap) / currentFDShares;
-          } else {
-            // Pre-money SAFE: price = cap / pre-round shares
-            capPrice = Number(safe.valuationCap) / currentFDShares;
-          }
+      {/* Pro Forma SAFE Conversion Simulation */}
+      {fullyDilutedCapTable.unconvertedSAFEs.length > 0 && proFormaData && (
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-charcoal-900">
+                Pro Forma Ownership (After SAFE Conversion)
+              </h3>
+              <p className="text-xs text-charcoal-500 mt-0.5">
+                Simulate what ownership looks like if a priced round happens
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-charcoal-500">Pre-money valuation:</label>
+              <div className="relative">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-charcoal-400 text-sm">{currencySymbol}</span>
+                <input
+                  type="number"
+                  value={proFormaValuation}
+                  onChange={(e) => setProFormaValuation(e.target.value)}
+                  placeholder="e.g. 10000000"
+                  className="input w-40 pl-6 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+          </div>
           
-          if (capPrice < effectivePrice) {
-            effectivePrice = capPrice;
-            method = 'cap';
-          }
-        }
-        
-        // Discount price
-        if (safe.discountPercent && safe.discountPercent > 0) {
-          const discountPrice = impliedPrice * (1 - safe.discountPercent / 100);
-          if (discountPrice < effectivePrice) {
-            effectivePrice = discountPrice;
-            method = 'discount';
-          }
-        }
-        
-        const shares = Math.round(principal / effectivePrice);
-        totalSafeShares += shares;
-        
-        safeConversions.push({
-          investorId: safe.investorId,
-          investorName: safe.investorName || 'Unknown',
-          principal,
-          cap: safe.valuationCap ? Number(safe.valuationCap) : null,
-          valuationType: safe.valuationType || 'pre_money',
-          discount: safe.discountPercent || 0,
-          effectivePrice,
-          shares,
-          method
-        });
-      }
-      
-      // Calculate post-conversion totals
-      const totalSharesAfter = currentFDShares + totalSafeShares;
-      
-      // Post-money valuation = pre-money + total SAFE investment
-      // Or equivalently: total shares × price per share
-      const postMoneyValuation = totalSharesAfter * impliedPrice;
-      
-      // Build pro forma ownership table
-      const proFormaRows: Array<{
-        holderId: string;
-        holderName: string;
-        holderType: string;
-        currentShares: number;
-        safeConversionShares: number;
-        totalShares: number;
-        currentPercent: number;
-        proFormaPercent: number;
-        dilution: number;
-        value: number;
-      }> = [];
-      
-      // Add existing shareholders
-      for (const row of fullyDilutedCapTable.rows) {
-        const currentPct = parseFloat(row.ownershipPercent);
-        const newPct = (row.totalShares / totalSharesAfter) * 100;
-        // Dilution = 1 - (new / old), as a percentage
-        // e.g., if you had 50% and now have 40%, dilution = 1 - 40/50 = 20%
-        const dilutionPct = currentPct > 0 ? (1 - newPct / currentPct) * 100 : 0;
-        
-        proFormaRows.push({
-          holderId: row.holderId,
-          holderName: row.holderName,
-          holderType: row.holderType,
-          currentShares: row.totalShares,
-          safeConversionShares: 0,
-          totalShares: row.totalShares,
-          currentPercent: currentPct,
-          proFormaPercent: newPct,
-          dilution: dilutionPct, // Positive = diluted
-          value: row.totalShares * impliedPrice
-        });
-      }
-      
-      // Add SAFE investors (they're gaining ownership, not being diluted)
-      for (const conv of safeConversions) {
-        const existingRow = proFormaRows.find(r => r.holderId === conv.investorId);
-        if (existingRow) {
-          const oldPct = existingRow.currentPercent;
-          existingRow.safeConversionShares = conv.shares;
-          existingRow.totalShares += conv.shares;
-          existingRow.proFormaPercent = (existingRow.totalShares / totalSharesAfter) * 100;
-          existingRow.value = existingRow.totalShares * impliedPrice;
-          // Recalculate dilution - if they had shares before, check if they're net diluted
-          existingRow.dilution = oldPct > 0 ? (1 - existingRow.proFormaPercent / oldPct) * 100 : 0;
-        } else {
-          // New investor - no dilution concept, they're gaining ownership
-          proFormaRows.push({
-            holderId: conv.investorId,
-            holderName: conv.investorName,
-            holderType: 'investor',
-            currentShares: 0,
-            safeConversionShares: conv.shares,
-            totalShares: conv.shares,
-            currentPercent: 0,
-            proFormaPercent: (conv.shares / totalSharesAfter) * 100,
-            dilution: 0, // New investors don't have dilution
-            value: conv.shares * impliedPrice
-          });
-        }
-      }
-      
-      return {
-        preMoneyValuation: preMoneyCapValuation,
-        postMoneyValuation,
-        impliedPrice,
-        safeConversions,
-        totalSafeShares,
-        totalSharesAfter,
-        rows: proFormaRows.sort((a, b) => b.proFormaPercent - a.proFormaPercent)
-      };
-    };
-    
-    // Calculate for highest cap scenario (pre-money)
-    const atHighestCap = calculateConversions(highestCap);
-    const atLowestCap = lowestCap !== highestCap ? calculateConversions(lowestCap) : null;
-    
-    return {
-      highestCap,
-      lowestCap,
-      atHighestCap,
-      atLowestCap,
-      totalSafePrincipal,
-      currentFDShares
-    };
-  }, [fullyDilutedCapTable, unconvertedSAFEs]);
-  
-  const [selectedScenario, setSelectedScenario] = useState<'highest' | 'lowest'>('highest');
-  
-  const formatCurrency = (amount: number) => {
-    if (amount >= 1000000) {
-      return `${currencySymbol}${(amount / 1000000).toFixed(2)}M`;
-    } else if (amount >= 1000) {
-      return `${currencySymbol}${(amount / 1000).toFixed(1)}K`;
-    }
-    return `${currencySymbol}${amount.toFixed(2)}`;
-  };
+          {/* Simulation Summary */}
+          <div className="px-4 py-3 bg-charcoal-50 border-b border-charcoal-100">
+            <div className="flex items-center gap-6 text-sm">
+              <div>
+                <span className="text-charcoal-500">Pre-money:</span>{' '}
+                <span className="font-mono font-medium">
+                  {proFormaData.preMoneyValuation ? formatCurrency(proFormaData.preMoneyValuation) : 'Using round price'}
+                </span>
+              </div>
+              <div>
+                <span className="text-charcoal-500">Post-money:</span>{' '}
+                <span className="font-mono font-medium text-emerald-600">
+                  {formatCurrency(proFormaData.postMoneyValuation)}
+                </span>
+              </div>
+              <div>
+                <span className="text-charcoal-500">Price/share:</span>{' '}
+                <span className="font-mono font-medium">
+                  {currencySymbol}{proFormaData.impliedPrice.toFixed(4)}
+                </span>
+              </div>
+              <div>
+                <span className="text-charcoal-500">New shares from SAFEs:</span>{' '}
+                <span className="font-mono font-medium">
+                  +{proFormaData.totalSafeShares.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            {!proFormaData.hasValuationInput && (
+              <p className="text-xs text-amber-600 mt-2">
+                ⚠️ No valuation entered — using {proFormaData.preMoneyValuation ? 'highest SAFE cap' : 'latest round price'} as reference
+              </p>
+            )}
+          </div>
 
-  if (!proFormaData) {
-    return (
-      <div className="space-y-6">
-        <div className="card p-8 text-center">
-          <TrendingUp className="w-12 h-12 text-charcoal-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-charcoal-900 mb-2">
-            No Outstanding SAFEs
-          </h3>
-          <p className="text-charcoal-600 max-w-md mx-auto">
-            Pro forma analysis requires outstanding SAFEs with valuation caps. 
-            Add SAFE issuance events to see projected ownership if they convert.
-          </p>
-        </div>
-      </div>
-    );
-  }
-  
-  const scenario = selectedScenario === 'highest' ? proFormaData.atHighestCap : proFormaData.atLowestCap || proFormaData.atHighestCap;
-
-  return (
-    <div className="space-y-6">
-      {/* Summary */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="stat-card">
-          <div className="stat-label">Outstanding SAFEs</div>
-          <div className="stat-value">{unconvertedSAFEs.length}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Total SAFE Principal</div>
-          <div className="stat-value">{formatCurrency(proFormaData.totalSafePrincipal)}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Highest Cap</div>
-          <div className="stat-value">{formatCurrency(proFormaData.highestCap)}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Lowest Cap</div>
-          <div className="stat-value">{formatCurrency(proFormaData.lowestCap)}</div>
-        </div>
-      </div>
-      
-      {/* Explanation */}
-      <div className="p-4 bg-amber-50 rounded-sm border border-amber-100 flex gap-3">
-        <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-        <div className="text-sm text-amber-800">
-          <p className="font-medium mb-1">Pro Forma Analysis</p>
-          <p>
-            Shows projected ownership if a priced round happens at your SAFE cap valuations. 
-            Use this to understand potential dilution and plan your fundraising strategy.
-            <strong className="block mt-1">This is a simulation — actual terms may vary.</strong>
-          </p>
-        </div>
-      </div>
-      
-      {/* Scenario Selector */}
-      {proFormaData.atLowestCap && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => setSelectedScenario('highest')}
-            className={`px-4 py-2 text-sm font-medium rounded-sm border transition-colors ${
-              selectedScenario === 'highest'
-                ? 'bg-charcoal-900 text-white border-charcoal-900'
-                : 'bg-white text-charcoal-600 border-charcoal-200 hover:border-charcoal-300'
-            }`}
-          >
-            At Highest Cap ({formatCurrency(proFormaData.highestCap)})
-          </button>
-          <button
-            onClick={() => setSelectedScenario('lowest')}
-            className={`px-4 py-2 text-sm font-medium rounded-sm border transition-colors ${
-              selectedScenario === 'lowest'
-                ? 'bg-charcoal-900 text-white border-charcoal-900'
-                : 'bg-white text-charcoal-600 border-charcoal-200 hover:border-charcoal-300'
-            }`}
-          >
-            At Lowest Cap ({formatCurrency(proFormaData.lowestCap)})
-          </button>
+          {/* Pro Forma Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-charcoal-50/50 border-b border-charcoal-200">
+                  <th className="px-4 py-2 text-left text-xs font-medium text-charcoal-500 uppercase tracking-wider">Stakeholder</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Current</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">+ SAFE</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Total</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[80px]">Own %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {proFormaData.rows.map((row) => (
+                  <tr key={row.holderName} className="border-b border-charcoal-100 hover:bg-charcoal-50/50">
+                    <td className="px-4 py-2 font-medium">{row.holderName}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">
+                      {row.currentShares > 0 ? row.currentShares.toLocaleString() : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums text-emerald-600">
+                      {row.safeShares > 0 ? `+${row.safeShares.toLocaleString()}` : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums font-medium">
+                      {row.totalShares.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">
+                      {row.proFormaPercent.toFixed(2)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-charcoal-50 font-medium">
+                  <td className="px-4 py-2">Total</td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums">
+                    {proFormaData.currentFDShares.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums text-emerald-600">
+                    +{proFormaData.totalSafeShares.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums">
+                    {proFormaData.totalSharesAfter.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono tabular-nums">100.00%</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       )}
-      
-      {/* Scenario Details */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="card p-4">
-          <div className="text-xs font-medium text-charcoal-500 uppercase tracking-wider mb-1">
-            Pre-Money Cap
-          </div>
-          <div className="text-xl font-semibold text-charcoal-900">
-            {formatCurrency(scenario.preMoneyValuation)}
-          </div>
-        </div>
-        <div className="card p-4">
-          <div className="text-xs font-medium text-charcoal-500 uppercase tracking-wider mb-1">
-            Post-Money Valuation
-          </div>
-          <div className="text-xl font-semibold text-emerald-600">
-            {formatCurrency(scenario.postMoneyValuation)}
-          </div>
-        </div>
-        <div className="card p-4">
-          <div className="text-xs font-medium text-charcoal-500 uppercase tracking-wider mb-1">
-            Price/Share
-          </div>
-          <div className="text-xl font-semibold text-charcoal-900">
-            {currencySymbol}{scenario.impliedPrice.toFixed(4)}
-          </div>
-        </div>
-        <div className="card p-4">
-          <div className="text-xs font-medium text-charcoal-500 uppercase tracking-wider mb-1">
-            Total Shares After
-          </div>
-          <div className="text-xl font-semibold text-charcoal-900">
-            {scenario.totalSharesAfter.toLocaleString()}
-          </div>
-        </div>
-      </div>
-      
-      {/* SAFE Conversion Details */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="text-sm font-semibold text-charcoal-900">
-            SAFE Conversion Details
-          </h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-charcoal-50 border-b border-charcoal-200">
-                <th className="px-4 py-3 text-left text-xs font-medium text-charcoal-500 uppercase tracking-wider">Investor</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Principal</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Cap</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Eff. Price</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Shares</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[90px]">Own %</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[90px]">Method</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scenario.safeConversions.map((conv) => (
-                <tr key={conv.investorId} className="border-b border-charcoal-100 hover:bg-charcoal-50/50">
-                  <td className="px-4 py-3 font-medium">{conv.investorName}</td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">{formatCurrency(conv.principal)}</td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {conv.cap ? formatCurrency(conv.cap) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">{currencySymbol}{conv.effectivePrice.toFixed(4)}</td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">{conv.shares.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {((conv.shares / scenario.totalSharesAfter) * 100).toFixed(2)}%
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      conv.method === 'cap' 
-                        ? 'bg-amber-100 text-amber-700' 
-                        : conv.method === 'discount'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-charcoal-100 text-charcoal-600'
-                    }`}>
-                      {conv.method === 'cap' ? 'At Cap' : conv.method === 'discount' ? 'Discount' : 'Round Price'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-charcoal-50 font-medium">
-                <td className="px-4 py-3">Total</td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums">
-                  {formatCurrency(scenario.safeConversions.reduce((sum, c) => sum + c.principal, 0))}
-                </td>
-                <td className="px-4 py-3"></td>
-                <td className="px-4 py-3"></td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums">{scenario.totalSafeShares.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums">
-                  {((scenario.totalSafeShares / scenario.totalSharesAfter) * 100).toFixed(2)}%
-                </td>
-                <td className="px-4 py-3"></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
-      
-      {/* Pro Forma Ownership Table */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="text-sm font-semibold text-charcoal-900">
-            Pro Forma Ownership (After SAFE Conversion)
-          </h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-charcoal-50 border-b border-charcoal-200">
-                <th className="px-4 py-3 text-left text-xs font-medium text-charcoal-500 uppercase tracking-wider">Stakeholder</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[90px]">Type</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Current</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">+ SAFE</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Total</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[80px]">Own %</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[70px]">Dilution</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-charcoal-500 uppercase tracking-wider w-[100px]">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scenario.rows.map((row) => (
-                <tr key={row.holderId} className="border-b border-charcoal-100 hover:bg-charcoal-50/50">
-                  <td className="px-4 py-3 font-medium">{row.holderName}</td>
-                  <td className="px-4 py-3">
-                    <span className="badge-default">
-                      {PERSON_TYPE_LABELS[row.holderType as keyof typeof PERSON_TYPE_LABELS] || row.holderType}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {row.currentShares > 0 ? row.currentShares.toLocaleString() : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-emerald-600">
-                    {row.safeConversionShares > 0 ? `+${row.safeConversionShares.toLocaleString()}` : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums font-medium">
-                    {row.totalShares.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {row.proFormaPercent.toFixed(2)}%
-                  </td>
-                  <td className={`px-4 py-3 text-right font-mono tabular-nums ${row.dilution > 0 ? 'text-red-600' : ''}`}>
-                    {row.currentPercent > 0 && row.dilution > 0 
-                      ? `${row.dilution.toFixed(1)}%` 
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums text-emerald-600">
-                    {formatCurrency(row.value)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-charcoal-50 font-medium">
-                <td className="px-4 py-3" colSpan={2}>Total</td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums">
-                  {proFormaData.currentFDShares.toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums text-emerald-600">
-                  +{scenario.totalSafeShares.toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums">
-                  {scenario.totalSharesAfter.toLocaleString()}
-                </td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums">100.00%</td>
-                <td className="px-4 py-3"></td>
-                <td className="px-4 py-3 text-right font-mono tabular-nums text-emerald-600">
-                  {formatCurrency(scenario.postMoneyValuation)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }
